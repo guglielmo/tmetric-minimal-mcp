@@ -84,13 +84,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'delete_time_entry',
-        description: 'Delete a time entry. If no entry_id provided, deletes the current timer.',
+        description: 'Delete a time entry. Mode "current" deletes active timer only, "last" deletes most recent entry (with 5-min safety window).',
         inputSchema: {
           type: 'object',
           properties: {
-            entry_id: {
+            mode: {
               type: 'string',
-              description: 'Optional: specific entry ID to delete. If not provided, deletes current timer.',
+              enum: ['current', 'last'],
+              description: 'Deletion mode: "current" for active timer only, "last" for most recent entry',
+              default: 'current',
             },
           },
         },
@@ -165,8 +167,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case 'delete_time_entry': {
-        const { entry_id } = args as { entry_id?: string };
-        const result = await tmetricClient.deleteTimeEntry(entry_id);
+        const { mode } = args as { mode?: 'current' | 'last' };
+        const result = await tmetricClient.deleteTimeEntry(mode);
         return {
           content: [
             {

@@ -252,7 +252,7 @@ describe('TMetricClient', () => {
       const result = await client.getCurrentTimer();
 
       expect(result.is_running).toBe(true);
-      expect(result.task_name).toBe('Unknown task');
+      expect(result.task_name).toBe('No description');
     });
 
     it('should throw error on API failure', async () => {
@@ -324,7 +324,7 @@ describe('TMetricClient', () => {
           name: 'Issue #42: Fix bug',
           externalLink: {
             link: 'https://gitlab.openpolis.io/test/repo/-/issues/42',
-            issueId: 'Gitlab Issue: #42',
+            issueId: 'GitLab Issue: #42',
           },
           integration: {
             url: 'https://gitlab.openpolis.io',
@@ -338,7 +338,7 @@ describe('TMetricClient', () => {
           expect(body.task.externalLink.link).toBe(
             'https://gitlab.openpolis.io/test/repo/-/issues/42'
           );
-          expect(body.task.externalLink.issueId).toBe('Gitlab Issue: #42');
+          expect(body.task.externalLink.issueId).toBe('GitLab Issue: #42');
           expect(body.task.integration.url).toBe('https://gitlab.openpolis.io');
           expect(body.task.integration.type).toBe('GitLab');
           return true;
@@ -448,24 +448,22 @@ describe('TMetricClient', () => {
         task: { name: 'Test Task' },
       };
 
-      // Mock getCurrentTimer
+      // Mock getActiveTimeEntry (used by stopTimer)
       nock(TMETRIC_BASE_URL)
         .get(`/api/v3/accounts/${ACCOUNT_ID}/timeentries`)
         .query({ startDate: '2024-01-15', endDate: '2024-01-15' })
         .reply(200, [runningEntry]);
 
-      // Mock get full entry
-      nock(TMETRIC_BASE_URL)
-        .get(`/api/v3/accounts/${ACCOUNT_ID}/timeentries/timer-123`)
-        .reply(200, runningEntry);
-
-      // Mock update entry
+      // Mock update entry (endTime format without Z suffix for local time)
       nock(TMETRIC_BASE_URL)
         .put(`/api/v3/accounts/${ACCOUNT_ID}/timeentries/timer-123`, (body) => {
-          expect(body.endTime).toBe('2024-01-15T12:00:00.000Z');
+          // Check that endTime is in local format (no Z suffix)
+          expect(body.endTime).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}$/);
+          expect(body.project.id).toBe(456);
+          expect(body.task.name).toBe('Test Task');
           return true;
         })
-        .reply(200, { ...runningEntry, endTime: '2024-01-15T12:00:00Z' });
+        .reply(200, [{ ...runningEntry, endTime: '2024-01-15T12:00:00' }]);
 
       const result = await client.stopTimer();
 
@@ -580,18 +578,226 @@ describe('TMetricClient', () => {
       await client.initialize();
     });
 
-    it('should delete entry by ID', async () => {
-      nock(TMETRIC_BASE_URL)
-        .delete(`/api/v3/accounts/${ACCOUNT_ID}/timeentries/entry-123`)
-        .reply(200);
+    describe('current mode (default)', () => {
+      it('should delete current timer when no mode specified', async () => {
+        const runningEntry: TMetricTimeEntry = {
+          id: 'timer-456',
+          startTime: '2024-01-15T10:00:00Z',
+          endTime: null,
+          project: { id: 123, name: 'Test' },
+          task: { name: 'Task' },
+        };
 
-      const result = await client.deleteTimeEntry('entry-123');
+        nock(TMETRIC_BASE_URL)
+          .get(`/api/v3/accounts/${ACCOUNT_ID}/timeentries`)
+          .query({ startDate: '2024-01-15', endDate: '2024-01-15' })
+          .reply(200, [runningEntry]);
 
-      expect(result.success).toBe(true);
-      expect(result.deleted).toBe('entry-123');
+        nock(TMETRIC_BASE_URL)
+          .delete(`/api/v3/accounts/${ACCOUNT_ID}/timeentries/timer-456`)
+          .reply(200);
+
+        const result = await client.deleteTimeEntry();
+
+        expect(result.success).toBe(true);
+        expect(result.deleted).toBe('timer-456');
+        expect(result.entry_type).toBe('active');
+      });
+
+      it('should delete current timer with mode "current"', async () => {
+        const runningEntry: TMetricTimeEntry = {
+          id: 'timer-456',
+          startTime: '2024-01-15T10:00:00Z',
+          endTime: null,
+          project: { id: 123, name: 'Test' },
+          task: { name: 'Task' },
+        };
+
+        nock(TMETRIC_BASE_URL)
+          .get(`/api/v3/accounts/${ACCOUNT_ID}/timeentries`)
+          .query({ startDate: '2024-01-15', endDate: '2024-01-15' })
+          .reply(200, [runningEntry]);
+
+        nock(TMETRIC_BASE_URL)
+          .delete(`/api/v3/accounts/${ACCOUNT_ID}/timeentries/timer-456`)
+          .reply(200);
+
+        const result = await client.deleteTimeEntry('current');
+
+        expect(result.success).toBe(true);
+        expect(result.deleted).toBe('timer-456');
+        expect(result.entry_type).toBe('active');
+      });
+
+      it('should fail when no timer running', async () => {
+        nock(TMETRIC_BASE_URL)
+          .get(`/api/v3/accounts/${ACCOUNT_ID}/timeentries`)
+          .query({ startDate: '2024-01-15', endDate: '2024-01-15' })
+          .reply(200, []);
+
+        const result = await client.deleteTimeEntry('current');
+
+        expect(result.success).toBe(false);
+        expect(result.error).toBe('NO_TIMER_RUNNING');
+        expect(result.message).toBe('No active timer to delete');
+      });
     });
 
-    it('should delete current timer when no ID provided', async () => {
+    describe('last mode', () => {
+      it('should delete active timer with mode "last"', async () => {
+        const runningEntry: TMetricTimeEntry = {
+          id: 'timer-789',
+          startTime: '2024-01-15T11:00:00Z',
+          endTime: null,
+          project: { id: 123, name: 'Test' },
+          task: { name: 'Task' },
+        };
+
+        nock(TMETRIC_BASE_URL)
+          .get(`/api/v3/accounts/${ACCOUNT_ID}/timeentries`)
+          .query({ startDate: '2024-01-15', endDate: '2024-01-15' })
+          .reply(200, [runningEntry]);
+
+        nock(TMETRIC_BASE_URL)
+          .delete(`/api/v3/accounts/${ACCOUNT_ID}/timeentries/timer-789`)
+          .reply(200);
+
+        const result = await client.deleteTimeEntry('last');
+
+        expect(result.success).toBe(true);
+        expect(result.deleted).toBe('timer-789');
+        expect(result.entry_type).toBe('active');
+        expect(result.stopped_ago).toBeUndefined();
+      });
+
+      it('should delete recently stopped entry (within 5 minutes)', async () => {
+        const stoppedEntry: TMetricTimeEntry = {
+          id: 'timer-recent',
+          startTime: '2024-01-15T11:00:00Z',
+          endTime: '2024-01-15T11:57:00Z', // 3 minutes ago (current time is 12:00)
+          project: { id: 123, name: 'Test' },
+          task: { name: 'Recent Task' },
+        };
+
+        nock(TMETRIC_BASE_URL)
+          .get(`/api/v3/accounts/${ACCOUNT_ID}/timeentries`)
+          .query({ startDate: '2024-01-15', endDate: '2024-01-15' })
+          .reply(200, [stoppedEntry]);
+
+        nock(TMETRIC_BASE_URL)
+          .delete(`/api/v3/accounts/${ACCOUNT_ID}/timeentries/timer-recent`)
+          .reply(200);
+
+        const result = await client.deleteTimeEntry('last');
+
+        expect(result.success).toBe(true);
+        expect(result.deleted).toBe('timer-recent');
+        expect(result.entry_type).toBe('stopped');
+        expect(result.stopped_ago).toBe('3m');
+      });
+
+      it('should fail when entry stopped more than 5 minutes ago', async () => {
+        const oldEntry: TMetricTimeEntry = {
+          id: 'timer-old',
+          startTime: '2024-01-15T10:00:00Z',
+          endTime: '2024-01-15T11:00:00Z', // 60 minutes ago
+          project: { id: 123, name: 'Test' },
+          task: { name: 'Old Task' },
+        };
+
+        nock(TMETRIC_BASE_URL)
+          .get(`/api/v3/accounts/${ACCOUNT_ID}/timeentries`)
+          .query({ startDate: '2024-01-15', endDate: '2024-01-15' })
+          .reply(200, [oldEntry]);
+
+        const result = await client.deleteTimeEntry('last');
+
+        expect(result.success).toBe(false);
+        expect(result.error).toBe('ENTRY_TOO_OLD');
+        expect(result.message).toContain('60 minutes ago');
+        expect(result.message).toContain('Use TMetric web UI');
+      });
+
+      it('should delete entry stopped exactly at 5 minute boundary', async () => {
+        const boundaryEntry: TMetricTimeEntry = {
+          id: 'timer-boundary',
+          startTime: '2024-01-15T11:00:00Z',
+          endTime: '2024-01-15T11:55:00Z', // Exactly 5 minutes ago
+          project: { id: 123, name: 'Test' },
+          task: { name: 'Boundary Task' },
+        };
+
+        nock(TMETRIC_BASE_URL)
+          .get(`/api/v3/accounts/${ACCOUNT_ID}/timeentries`)
+          .query({ startDate: '2024-01-15', endDate: '2024-01-15' })
+          .reply(200, [boundaryEntry]);
+
+        nock(TMETRIC_BASE_URL)
+          .delete(`/api/v3/accounts/${ACCOUNT_ID}/timeentries/timer-boundary`)
+          .reply(200);
+
+        const result = await client.deleteTimeEntry('last');
+
+        expect(result.success).toBe(true);
+        expect(result.deleted).toBe('timer-boundary');
+        expect(result.stopped_ago).toBe('5m');
+      });
+
+      it('should select most recent entry when multiple exist', async () => {
+        const entries: TMetricTimeEntry[] = [
+          {
+            id: 'timer-older',
+            startTime: '2024-01-15T09:00:00Z',
+            endTime: '2024-01-15T10:00:00Z',
+            project: { id: 123, name: 'Test' },
+            task: { name: 'Older Task' },
+          },
+          {
+            id: 'timer-recent',
+            startTime: '2024-01-15T11:00:00Z',
+            endTime: '2024-01-15T11:58:00Z', // Most recent, 2 min ago
+            project: { id: 123, name: 'Test' },
+            task: { name: 'Recent Task' },
+          },
+          {
+            id: 'timer-middle',
+            startTime: '2024-01-15T10:00:00Z',
+            endTime: '2024-01-15T11:00:00Z',
+            project: { id: 123, name: 'Test' },
+            task: { name: 'Middle Task' },
+          },
+        ];
+
+        nock(TMETRIC_BASE_URL)
+          .get(`/api/v3/accounts/${ACCOUNT_ID}/timeentries`)
+          .query({ startDate: '2024-01-15', endDate: '2024-01-15' })
+          .reply(200, entries);
+
+        nock(TMETRIC_BASE_URL)
+          .delete(`/api/v3/accounts/${ACCOUNT_ID}/timeentries/timer-recent`)
+          .reply(200);
+
+        const result = await client.deleteTimeEntry('last');
+
+        expect(result.success).toBe(true);
+        expect(result.deleted).toBe('timer-recent');
+      });
+
+      it('should fail when no entries exist today', async () => {
+        nock(TMETRIC_BASE_URL)
+          .get(`/api/v3/accounts/${ACCOUNT_ID}/timeentries`)
+          .query({ startDate: '2024-01-15', endDate: '2024-01-15' })
+          .reply(200, []);
+
+        const result = await client.deleteTimeEntry('last');
+
+        expect(result.success).toBe(false);
+        expect(result.error).toBe('NO_ENTRIES_FOUND');
+        expect(result.message).toBe('No time entries found for today');
+      });
+    });
+
+    it('should handle API errors', async () => {
       const runningEntry: TMetricTimeEntry = {
         id: 'timer-456',
         startTime: '2024-01-15T10:00:00Z',
@@ -607,33 +813,9 @@ describe('TMetricClient', () => {
 
       nock(TMETRIC_BASE_URL)
         .delete(`/api/v3/accounts/${ACCOUNT_ID}/timeentries/timer-456`)
-        .reply(200);
-
-      const result = await client.deleteTimeEntry();
-
-      expect(result.success).toBe(true);
-      expect(result.deleted).toBe('timer-456');
-    });
-
-    it('should fail when no timer running and no ID provided', async () => {
-      nock(TMETRIC_BASE_URL)
-        .get(`/api/v3/accounts/${ACCOUNT_ID}/timeentries`)
-        .query({ startDate: '2024-01-15', endDate: '2024-01-15' })
-        .reply(200, []);
-
-      const result = await client.deleteTimeEntry();
-
-      expect(result.success).toBe(false);
-      expect(result.error).toBe('NO_TIMER_RUNNING');
-      expect(result.message).toBe('No active timer to delete');
-    });
-
-    it('should handle API errors', async () => {
-      nock(TMETRIC_BASE_URL)
-        .delete(`/api/v3/accounts/${ACCOUNT_ID}/timeentries/entry-123`)
         .reply(404, { error: 'Not found' });
 
-      const result = await client.deleteTimeEntry('entry-123');
+      const result = await client.deleteTimeEntry();
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('API_ERROR');
@@ -641,11 +823,24 @@ describe('TMetricClient', () => {
     });
 
     it('should handle network errors', async () => {
+      const runningEntry: TMetricTimeEntry = {
+        id: 'timer-456',
+        startTime: '2024-01-15T10:00:00Z',
+        endTime: null,
+        project: { id: 123, name: 'Test' },
+        task: { name: 'Task' },
+      };
+
       nock(TMETRIC_BASE_URL)
-        .delete(`/api/v3/accounts/${ACCOUNT_ID}/timeentries/entry-123`)
+        .get(`/api/v3/accounts/${ACCOUNT_ID}/timeentries`)
+        .query({ startDate: '2024-01-15', endDate: '2024-01-15' })
+        .reply(200, [runningEntry]);
+
+      nock(TMETRIC_BASE_URL)
+        .delete(`/api/v3/accounts/${ACCOUNT_ID}/timeentries/timer-456`)
         .replyWithError('Network error');
 
-      const result = await client.deleteTimeEntry('entry-123');
+      const result = await client.deleteTimeEntry();
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('API_ERROR');

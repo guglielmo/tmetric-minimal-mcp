@@ -10,9 +10,10 @@ import {
   calculateElapsed,
   calculateDurationMinutes,
   formatMinutesToGitLab,
-  extractGitLabBaseUrl,
+  extractBaseUrl,
   extractIssueNumber,
-  formatIssueId
+  formatIssueId,
+  detectIntegrationType
 } from './utils.js';
 
 export class TMetricClient {
@@ -78,35 +79,75 @@ export class TMetricClient {
   }
 
   /**
+   * Get active time entry (full object) from today's entries
+   */
+  private async getActiveTimeEntry(): Promise<TMetricTimeEntry | null> {
+    await this.ensureInitialized();
+
+    const today = new Date().toISOString().split('T')[0];
+
+    const response = await this.client.get<TMetricTimeEntry[]>(
+      `/accounts/${this.accountId}/timeentries`,
+      {
+        params: {
+          startDate: today,
+          endDate: today
+        }
+      }
+    );
+
+    // Find entry with no endTime (active timer)
+    return response.data.find(entry => entry.endTime === null) || null;
+  }
+
+  /**
+   * Get last time entry (most recent) from today's entries
+   */
+  private async getLastTimeEntry(): Promise<TMetricTimeEntry | null> {
+    await this.ensureInitialized();
+
+    const today = new Date().toISOString().split('T')[0];
+
+    const response = await this.client.get<TMetricTimeEntry[]>(
+      `/accounts/${this.accountId}/timeentries`,
+      {
+        params: {
+          startDate: today,
+          endDate: today
+        }
+      }
+    );
+
+    if (response.data.length === 0) {
+      return null;
+    }
+
+    // Sort by startTime descending, return most recent
+    const sorted = response.data.sort((a, b) =>
+      new Date(b.startTime).getTime() - new Date(a.startTime).getTime()
+    );
+
+    return sorted[0];
+  }
+
+  /**
    * Get current running timer by querying today's time entries
    */
   async getCurrentTimer(): Promise<TimerInfo> {
     try {
-      await this.ensureInitialized();
-
-      const today = new Date().toISOString().split('T')[0];
-
-      const response = await this.client.get<TMetricTimeEntry[]>(
-        `/accounts/${this.accountId}/timeentries`,
-        {
-          params: {
-            startDate: today,
-            endDate: today
-          }
-        }
-      );
-
-      // Find entry with no endTime (active timer)
-      const activeEntry = response.data.find(entry => entry.endTime === null);
+      const activeEntry = await this.getActiveTimeEntry();
 
       if (!activeEntry) {
         return { is_running: false };
       }
 
+      // Task name comes from either task.name or note field
+      const taskName = activeEntry.task?.name || activeEntry.note || 'No description';
+
       return {
         is_running: true,
         timer_id: activeEntry.id,
-        task_name: activeEntry.task?.name || 'Unknown task',
+        task_name: taskName,
         task_url: activeEntry.task?.externalLink?.link,
         project_name: activeEntry.project?.name || 'No project',
         project_id: activeEntry.project?.id,
@@ -143,19 +184,20 @@ export class TMetricClient {
       // Build task object
       const task: any = { name: taskName };
 
-      // Add GitLab integration if task URL provided
+      // Add integration (GitLab or GitHub) if task URL provided
       if (taskUrl) {
         const issueNumber = extractIssueNumber(taskUrl);
-        const gitlabBaseUrl = extractGitLabBaseUrl(taskUrl);
+        const baseUrl = extractBaseUrl(taskUrl);
+        const integrationType = detectIntegrationType(taskUrl);
 
         if (issueNumber) {
           task.externalLink = {
             link: taskUrl,
-            issueId: formatIssueId(issueNumber)
+            issueId: formatIssueId(issueNumber, integrationType)
           };
           task.integration = {
-            url: gitlabBaseUrl,
-            type: 'GitLab'
+            url: baseUrl,
+            type: integrationType
           };
         }
       }
@@ -196,9 +238,10 @@ export class TMetricClient {
     try {
       await this.ensureInitialized();
 
-      // Get current timer
-      const current = await this.getCurrentTimer();
-      if (!current.is_running) {
+      // Get active time entry (full object)
+      const activeEntry = await this.getActiveTimeEntry();
+
+      if (!activeEntry) {
         return {
           success: false,
           error: 'NO_TIMER_RUNNING',
@@ -206,37 +249,60 @@ export class TMetricClient {
         };
       }
 
-      const timerId = current.timer_id!;
+      const timerId = activeEntry.id;
+      const startTime = activeEntry.startTime;
 
-      // Get full entry details
-      const entryResponse = await this.client.get<TMetricTimeEntry>(
-        `/accounts/${this.accountId}/timeentries/${timerId}`
-      );
+      // Set endTime to now in local timezone (matching startTime format)
+      const now = new Date();
+      const endTime = new Date(now.getTime() - (now.getTimezoneOffset() * 60000))
+        .toISOString()
+        .slice(0, -1); // Remove Z suffix
 
-      const fullEntry = entryResponse.data;
+      // Build clean request body with only necessary fields
+      const updateData: any = {
+        startTime: startTime,
+        endTime: endTime,
+        project: {
+          id: activeEntry.project?.id
+        },
+        tags: activeEntry.tags || []
+      };
 
-      // Set endTime to now
-      fullEntry.endTime = new Date().toISOString();
+      // Include task if present (with name), otherwise use note
+      if (activeEntry.task && activeEntry.task.name) {
+        updateData.task = {
+          name: activeEntry.task.name
+        };
 
-      // Update entry
+        // Add external link if present
+        if (activeEntry.task.externalLink) {
+          updateData.task.externalLink = activeEntry.task.externalLink;
+        }
+
+        // Add integration if present
+        if (activeEntry.task.integration) {
+          updateData.task.integration = activeEntry.task.integration;
+        }
+      } else if (activeEntry.note) {
+        updateData.note = activeEntry.note;
+      }
+
+      // Update entry with PUT
       await this.client.put(
         `/accounts/${this.accountId}/timeentries/${timerId}`,
-        fullEntry
+        updateData
       );
 
       // Calculate duration
-      const durationMinutes = calculateDurationMinutes(
-        current.started_at!,
-        fullEntry.endTime
-      );
+      const durationMinutes = calculateDurationMinutes(startTime, endTime);
 
       return {
         success: true,
         time_spent: formatMinutesToGitLab(durationMinutes),
         time_spent_minutes: durationMinutes,
-        started_at: current.started_at,
-        ended_at: fullEntry.endTime,
-        task_name: current.task_name
+        started_at: startTime,
+        ended_at: endTime,
+        task_name: activeEntry.task?.name || 'Unknown task'
       };
     } catch (error: any) {
       return {
@@ -250,14 +316,16 @@ export class TMetricClient {
   /**
    * Delete a time entry
    */
-  async deleteTimeEntry(entryId?: string): Promise<ApiResponse> {
+  async deleteTimeEntry(mode: 'current' | 'last' = 'current'): Promise<ApiResponse> {
     try {
       await this.ensureInitialized();
 
-      let targetId = entryId;
+      let targetId: string | undefined;
+      let entryType: 'active' | 'stopped' | undefined;
+      let stoppedAgo: string | undefined;
 
-      // If no entry ID provided, use current timer
-      if (!targetId) {
+      if (mode === 'current') {
+        // Existing behavior: only delete active timer
         const current = await this.getCurrentTimer();
         if (!current.is_running) {
           return {
@@ -266,17 +334,65 @@ export class TMetricClient {
             message: 'No active timer to delete'
           };
         }
-        targetId = current.timer_id;
+        targetId = current.timer_id!;
+        entryType = 'active';
+
+      } else if (mode === 'last') {
+        // New behavior: delete most recent entry with safety check
+        const lastEntry = await this.getLastTimeEntry();
+
+        if (!lastEntry) {
+          return {
+            success: false,
+            error: 'NO_ENTRIES_FOUND',
+            message: 'No time entries found for today'
+          };
+        }
+
+        // Check if stopped and how long ago
+        if (lastEntry.endTime !== null) {
+          const endTime = new Date(lastEntry.endTime);
+          const now = new Date();
+          const minutesAgo = Math.floor((now.getTime() - endTime.getTime()) / (1000 * 60));
+
+          if (minutesAgo > 5) {
+            return {
+              success: false,
+              error: 'ENTRY_TOO_OLD',
+              message: `Last entry stopped ${minutesAgo} minutes ago. Use TMetric web UI to delete specific entries.`
+            };
+          }
+
+          entryType = 'stopped';
+          stoppedAgo = `${minutesAgo}m`;
+        } else {
+          entryType = 'active';
+        }
+
+        targetId = lastEntry.id;
       }
 
+      // This should never happen due to mode type constraint, but TypeScript needs it
+      if (!targetId || !entryType) {
+        return {
+          success: false,
+          error: 'INVALID_MODE',
+          message: 'Invalid deletion mode'
+        };
+      }
+
+      // Perform deletion
       await this.client.delete(
         `/accounts/${this.accountId}/timeentries/${targetId}`
       );
 
       return {
         success: true,
-        deleted: targetId
+        deleted: targetId,
+        entry_type: entryType,
+        stopped_ago: stoppedAgo
       };
+
     } catch (error: any) {
       return {
         success: false,
