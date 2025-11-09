@@ -27,37 +27,96 @@ export TMETRIC_API_TOKEN="your_token_here"
 
 ## Usage with Claude Code
 
-Add to your MCP settings file (usually `~/.config/claude-code/mcp.json`):
+Add the TMetric MCP server using the `claude mcp add` command. You can install at different scopes:
 
-```json
-{
-  "mcpServers": {
-    "tmetric": {
-      "command": "node",
-      "args": ["/path/to/tmetric-mcp-server/build/index.js"],
-      "env": {
-        "TMETRIC_API_TOKEN": "your_token_here"
-      }
-    }
-  }
-}
+### User Scope (Global - All Projects)
+
+Available across all projects for your user:
+
+**One-liner:**
+```bash
+claude mcp add --scope user tmetric-mcp --env TMETRIC_API_TOKEN=your_token_here -- node /path/to/tmetric-mcp-server/build/index.js
 ```
 
-Or use npx:
-
-```json
-{
-  "mcpServers": {
-    "tmetric": {
-      "command": "npx",
-      "args": ["-y", "/path/to/tmetric-mcp-server"],
-      "env": {
-        "TMETRIC_API_TOKEN": "your_token_here"
-      }
-    }
-  }
-}
+**Interactive:**
+```bash
+claude mcp add tmetric-mcp --scope user
 ```
+
+When prompted, configure:
+- **Command**: `node`
+- **Args**: `/path/to/tmetric-mcp-server/build/index.js`
+- **Environment variables**: `TMETRIC_API_TOKEN=your_token_here`
+
+### Project Scope (Specific Project)
+
+Available only in the current project directory:
+
+**One-liner:**
+```bash
+claude mcp add --scope project tmetric-mcp --env TMETRIC_API_TOKEN=your_token_here -- node /path/to/tmetric-mcp-server/build/index.js
+```
+
+**Interactive:**
+```bash
+claude mcp add tmetric-mcp --scope project
+```
+
+When prompted, configure with the same settings as above.
+
+### Local Scope (Current Directory)
+
+Available only in the current working directory:
+
+**One-liner:**
+```bash
+claude mcp add --scope local tmetric-mcp --env TMETRIC_API_TOKEN=your_token_here -- node /path/to/tmetric-mcp-server/build/index.js
+```
+
+**Interactive:**
+```bash
+claude mcp add tmetric-mcp --scope local
+```
+
+When prompted, configure with the same settings as above.
+
+### Alternative: Using npx (from GitHub)
+
+You can run directly from GitHub with npx (no clone or build needed):
+
+**One-liner:**
+```bash
+claude mcp add --scope user tmetric-mcp --env TMETRIC_API_TOKEN=your_token_here -- npx -y github:guglielmo/tmetric-minimal-mcp
+```
+
+**Interactive:**
+```bash
+claude mcp add tmetric-mcp --scope user
+```
+
+When prompted, configure:
+- **Command**: `npx`
+- **Args**: `-y github:guglielmo/tmetric-minimal-mcp`
+- **Environment variables**: `TMETRIC_API_TOKEN=your_token_here`
+
+### Alternative: Using npx (from local path)
+
+If you've cloned the repository locally:
+
+**One-liner:**
+```bash
+claude mcp add --scope user tmetric-mcp --env TMETRIC_API_TOKEN=your_token_here -- npx -y /path/to/tmetric-mcp-server
+```
+
+**Interactive:**
+```bash
+claude mcp add tmetric-mcp --scope user
+```
+
+When prompted, configure:
+- **Command**: `npx`
+- **Args**: `-y /path/to/tmetric-mcp-server`
+- **Environment variables**: `TMETRIC_API_TOKEN=your_token_here`
 
 ## Available Tools
 
