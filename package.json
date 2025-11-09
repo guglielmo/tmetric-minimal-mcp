@@ -1,0 +1,58 @@
+{
+  "name": "@guglielmo/tmetric-minimal-mcp",
+  "version": "2.0.0",
+  "description": "Minimal Model Context Protocol server for TMetric time tracking",
+  "main": "build/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "dev": "tsx src/index.ts",
+    "prepare": "npm run build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage",
+    "test:coverage:watch": "vitest --coverage"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "tmetric",
+    "time-tracking",
+    "claude",
+    "minimal"
+  ],
+  "author": "Guglielmo Celata",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/guglielmo/tmetric-minimal-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/guglielmo/tmetric-minimal-mcp/issues"
+  },
+  "homepage": "https://github.com/guglielmo/tmetric-minimal-mcp#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "axios": "^1.6.0",
+    "date-fns": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/axios": "^0.14.0",
+    "@types/node": "^20.0.0",
+    "@vitest/coverage-v8": "^4.0.8",
+    "@vitest/ui": "^4.0.8",
+    "c8": "^10.1.3",
+    "nock": "^14.0.10",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.8"
+  },
+  "bin": {
+    "tmetric-minimal-mcp": "./build/index.js"
+  },
+  "files": [
+    "build/"
+  ]
+}
