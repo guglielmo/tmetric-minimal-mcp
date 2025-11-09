@@ -3,9 +3,10 @@ import {
   calculateElapsed,
   calculateDurationMinutes,
   formatMinutesToGitLab,
-  extractGitLabBaseUrl,
+  extractBaseUrl,
   extractIssueNumber,
   formatIssueId,
+  detectIntegrationType,
 } from './utils.js';
 
 describe('calculateElapsed', () => {
@@ -117,40 +118,68 @@ describe('formatMinutesToGitLab', () => {
   });
 });
 
-describe('extractGitLabBaseUrl', () => {
+describe('detectIntegrationType', () => {
+  it('should detect GitHub URLs', () => {
+    const url = 'https://github.com/user/repo/issues/123';
+    expect(detectIntegrationType(url)).toBe('GitHub');
+  });
+
+  it('should detect GitLab.com URLs', () => {
+    const url = 'https://gitlab.com/user/repo/-/issues/123';
+    expect(detectIntegrationType(url)).toBe('GitLab');
+  });
+
+  it('should detect custom GitLab instance URLs', () => {
+    const url = 'https://gitlab.openpolis.io/group/project/-/issues/456';
+    expect(detectIntegrationType(url)).toBe('GitLab');
+  });
+
+  it('should default to GitLab for invalid URLs', () => {
+    const url = 'not-a-valid-url';
+    expect(detectIntegrationType(url)).toBe('GitLab');
+  });
+});
+
+describe('extractBaseUrl', () => {
   it('should extract base URL from GitLab issue URL', () => {
     const url = 'https://gitlab.openpolis.io/group/project/-/issues/123';
-    const result = extractGitLabBaseUrl(url);
+    const result = extractBaseUrl(url);
     expect(result).toBe('https://gitlab.openpolis.io');
   });
 
   it('should extract base URL from gitlab.com', () => {
     const url = 'https://gitlab.com/user/repo/-/issues/456';
-    const result = extractGitLabBaseUrl(url);
+    const result = extractBaseUrl(url);
     expect(result).toBe('https://gitlab.com');
+  });
+
+  it('should extract base URL from GitHub', () => {
+    const url = 'https://github.com/user/repo/issues/123';
+    const result = extractBaseUrl(url);
+    expect(result).toBe('https://github.com');
   });
 
   it('should handle HTTP URLs', () => {
     const url = 'http://gitlab.example.com/project/-/issues/789';
-    const result = extractGitLabBaseUrl(url);
+    const result = extractBaseUrl(url);
     expect(result).toBe('http://gitlab.example.com');
   });
 
   it('should handle URLs with ports', () => {
     const url = 'https://gitlab.example.com:8080/project/-/issues/1';
-    const result = extractGitLabBaseUrl(url);
+    const result = extractBaseUrl(url);
     expect(result).toBe('https://gitlab.example.com:8080');
   });
 
   it('should return default fallback for invalid URLs', () => {
     const url = 'not-a-valid-url';
-    const result = extractGitLabBaseUrl(url);
+    const result = extractBaseUrl(url);
     expect(result).toBe('https://gitlab.com');
   });
 
   it('should handle URLs with complex paths', () => {
     const url = 'https://gitlab.example.com/group/subgroup/project/-/issues/99';
-    const result = extractGitLabBaseUrl(url);
+    const result = extractBaseUrl(url);
     expect(result).toBe('https://gitlab.example.com');
   });
 });
@@ -160,6 +189,12 @@ describe('extractIssueNumber', () => {
     const url = 'https://gitlab.com/user/repo/-/issues/123';
     const result = extractIssueNumber(url);
     expect(result).toBe('123');
+  });
+
+  it('should extract issue number from GitHub URL', () => {
+    const url = 'https://github.com/user/repo/issues/456';
+    const result = extractIssueNumber(url);
+    expect(result).toBe('456');
   });
 
   it('should extract issue number from URL with complex path', () => {
@@ -201,22 +236,27 @@ describe('extractIssueNumber', () => {
 
 describe('formatIssueId', () => {
   it('should format issue number with GitLab prefix', () => {
-    const result = formatIssueId('123');
-    expect(result).toBe('Gitlab Issue: #123');
+    const result = formatIssueId('123', 'GitLab');
+    expect(result).toBe('GitLab Issue: #123');
+  });
+
+  it('should format issue number with GitHub prefix', () => {
+    const result = formatIssueId('456', 'GitHub');
+    expect(result).toBe('GitHub Issue: #456');
   });
 
   it('should format single digit issue number', () => {
-    const result = formatIssueId('1');
-    expect(result).toBe('Gitlab Issue: #1');
+    const result = formatIssueId('1', 'GitLab');
+    expect(result).toBe('GitLab Issue: #1');
   });
 
   it('should format multi-digit issue number', () => {
-    const result = formatIssueId('999999');
-    expect(result).toBe('Gitlab Issue: #999999');
+    const result = formatIssueId('999999', 'GitHub');
+    expect(result).toBe('GitHub Issue: #999999');
   });
 
   it('should handle issue number as string', () => {
-    const result = formatIssueId('0');
-    expect(result).toBe('Gitlab Issue: #0');
+    const result = formatIssueId('0', 'GitLab');
+    expect(result).toBe('GitLab Issue: #0');
   });
 });

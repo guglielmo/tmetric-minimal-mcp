@@ -46,11 +46,29 @@ export function formatMinutesToGitLab(minutes: number): string {
 }
 
 /**
- * Extract GitLab base URL from issue URL
+ * Detect integration type from issue URL
+ * Returns 'GitHub' or 'GitLab'
+ */
+export function detectIntegrationType(issueUrl: string): 'GitHub' | 'GitLab' {
+  try {
+    const url = new URL(issueUrl);
+    if (url.host.includes('github.com')) {
+      return 'GitHub';
+    }
+    return 'GitLab'; // Default to GitLab for all other hosts
+  } catch {
+    return 'GitLab';
+  }
+}
+
+/**
+ * Extract base URL from issue URL
  * e.g., "https://gitlab.openpolis.io/group/project/-/issues/123"
  *    -> "https://gitlab.openpolis.io"
+ * e.g., "https://github.com/user/repo/issues/123"
+ *    -> "https://github.com"
  */
-export function extractGitLabBaseUrl(issueUrl: string): string {
+export function extractBaseUrl(issueUrl: string): string {
   try {
     const url = new URL(issueUrl);
     return `${url.protocol}//${url.host}`;
@@ -60,8 +78,9 @@ export function extractGitLabBaseUrl(issueUrl: string): string {
 }
 
 /**
- * Extract issue number from GitLab URL
+ * Extract issue number from issue URL (works for both GitLab and GitHub)
  * e.g., "https://gitlab.../issues/123" -> "123"
+ * e.g., "https://github.com/user/repo/issues/123" -> "123"
  */
 export function extractIssueNumber(issueUrl: string): string | null {
   const match = issueUrl.match(/issues\/(\d+)/);
@@ -71,6 +90,6 @@ export function extractIssueNumber(issueUrl: string): string | null {
 /**
  * Format issue number for TMetric display
  */
-export function formatIssueId(issueNumber: string): string {
-  return `Gitlab Issue: #${issueNumber}`;
+export function formatIssueId(issueNumber: string, integrationType: 'GitHub' | 'GitLab'): string {
+  return `${integrationType} Issue: #${issueNumber}`;
 }

@@ -22,6 +22,7 @@ export interface TMetricTimeEntry {
       type: string;
     };
   };
+  note?: string;
   tags?: string[];
 }
 
