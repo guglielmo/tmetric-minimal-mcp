@@ -193,6 +193,12 @@ Check that your API token is valid and you have network access to TMetric.
 ### "Timer already running"
 This is expected behavior. Stop the current timer before starting a new one.
 
+## Used By
+
+This MCP server is a dependency for the following Claude Code skills:
+
+- **[issue-time-tracking](../../skills/issue-time-tracking/)** - Automates synchronized issue status tracking and time logging across GitLab/GitHub and TMetric
+
 ## License
 
 MIT
